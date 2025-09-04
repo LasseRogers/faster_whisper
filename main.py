@@ -3,10 +3,7 @@
 import sys
 import yaml
 import logging
-import json
 import torch
-import subprocess
-from tqdm import tqdm
 from faster_whisper import WhisperModel
 
 # Check if audio file is provided
@@ -26,73 +23,64 @@ language = config.get("language", None)
 vad_filter = config.get("vad_filter", False)
 logging_enabled = config.get("logging_enabled", False)
 
-# Setup logging if enabled
+# Output file
+output_file = "transcription.txt"
+
+# Setup logging
+logger = None
 if logging_enabled:
-    logging.basicConfig()
-    logging.getLogger("faster_whisper").setLevel(logging.INFO) # DEBUG for VAD segments
+    logger = logging.getLogger("faster_whisper")
+    logger.setLevel(logging.INFO) # DEBUG for VAD segments
+
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # Terminal handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # File handler
+    file_handler = logging.FileHandler(output_file, encoding="utf-8", mode="w")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
 # Print device
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
+if logging_enabled:
+    logger.info(f"Using device: {device}")
 
-# Run model
-model = WhisperModel(model_size, device=device, compute_type="float16" if device=="cuda" else "int8")
-
-# Function to get total duration using ffprobe
-def get_audio_duration(filename):
-    """Return duration of audio/video in seconds using ffprobe."""
-    cmd = [
-        "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        filename
-    ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return float(result.stdout.strip())
-
-# Get total duration of audio/video in seconds
-total_duration = get_audio_duration(audio_file)
+# Load model
+model = WhisperModel(
+    model_size,
+    device=device,
+    compute_type="float16" if device == "cuda" else "int8"
+)
 
 # Transcribe audio
-segments, info = model.transcribe(audio_file, beam_size=beam_size, language=language, vad_filter=vad_filter)
+segments, info = model.transcribe(
+    audio_file,
+    beam_size=beam_size,
+    language=language,
+    vad_filter=vad_filter
+)
 
-# Pprogress bar
-print("\nTranscribing audio:")
-with tqdm(total=total_duration, unit="s", unit_scale=True, desc="Audio progress") as pbar:
+# Write transcription to the same file
+with open(output_file, "a", encoding="utf-8") as f:
+    if language is None:
+        lang_info = "Auto-detected language '%s' with probability %f\n\n" % (
+            info.language, info.language_probability
+        )
+    else:
+        lang_info = "Specified language '%s' (detected probability %f)\n\n" % (
+            info.language, info.language_probability
+        )
+    print(lang_info.strip())
+    f.write(lang_info)
+
     for segment in segments:
-        # update progress to the end of this segment
-        pbar.n = min(segment.end, total_duration)
-        pbar.refresh()
+        line = "[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text)
+        #print(line)
+        f.write(line + "\n")
 
-# Print detected or specified language
-if language is None:
-    print("Auto-detected language '%s' with probability %f" % (info.language, info.language_probability))
-else:
-    print("Specified language '%s' (detected probability %f)" % (info.language, info.language_probability))
-
-# Print transcription segments
-for segment in segments:
-    print("[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text))
-
-# Save SRT file
-srt_file = audio_file.rsplit(".", 1)[0] + ".srt"
-with open(srt_file, "w", encoding="utf-8") as f:
-    for i, segment in enumerate(segments, start=1):
-        f.write(f"{i}\n")
-        f.write(f"{segment.start:.3f} --> {segment.end:.3f}\n")
-        f.write(f"{segment.text}\n\n")
-print(f"SRT saved to {srt_file}")
-
-# Save JSON file
-json_file = audio_file.rsplit(".", 1)[0] + ".json"
-json_data = {
-    "language": info.language,
-    "language_probability": info.language_probability,
-    "segments": [
-        {"start": s.start, "end": s.end, "text": s.text} for s in segments
-    ]
-}
-with open(json_file, "w", encoding="utf-8") as f:
-    json.dump(json_data, f, indent=2, ensure_ascii=False)
-print(f"JSON saved to {json_file}")
+print(f"\nTranscription saved to {output_file}")
