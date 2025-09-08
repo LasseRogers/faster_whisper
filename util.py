@@ -50,6 +50,7 @@ def get_output_files(audio_file: str, output_dir: str = ".") -> dict:
     }
 
 def write_transcription_json(
+    # Write transcription segments and metadata to JSON
     audio_file: str,
     segments: list,
     info,
