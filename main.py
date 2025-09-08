@@ -55,7 +55,8 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
         for segment in segments:
             # Format: [start_time -> end_time] transcribed_text
             line = "[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text)
-            f.write(line + "\n")  # Write segment to TXT file
+            # Write segment to TXT file
+            f.write(line + "\n")
             segments_data.append({"start": segment.start, "end": segment.end, "text": segment.text})
 
     # Calculate total transcription time
@@ -64,7 +65,7 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
     if logger:
         logger.info(f"Text transcription saved to {txt_file}")
 
-    # Save metadata and durations to JSON
+    # Save metadata to JSON
     write_transcription_json(
         audio_file,
         segments_data,
