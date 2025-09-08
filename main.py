@@ -10,7 +10,7 @@ from util import (
     setup_logger,
     get_device,
     load_batched_model,
-    get_output_file,
+    get_output_files,
     write_transcription_json,
     collect_audio_files
 )
@@ -26,8 +26,10 @@ def parse_args():
 
 
 def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None, vad_filter=False, logger=None, device=None):
-    # Determine the output TXT file path
-    txt_file = get_output_file(audio_file, output_dir)
+    # Get both TXT and JSON output paths
+    files = get_output_files(audio_file, output_dir)
+    txt_file = files["txt"]
+    json_file = files["json"]
 
     # Store segment info for JSON output
     segments_data = []
@@ -63,12 +65,12 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
         logger.info(f"Text transcription saved to {txt_file}")
 
     # Save metadata and durations to JSON
-    json_file = write_transcription_json(
+    write_transcription_json(
         audio_file,
         segments_data,
         info,
+        json_file=json_file,
         device=device,
-        output_dir=output_dir,
         transcription_time_sec=transcription_time_sec
     )
 

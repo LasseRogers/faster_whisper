@@ -41,32 +41,34 @@ def load_batched_model(model_size: str, device: str) -> BatchedInferencePipeline
     return BatchedInferencePipeline(model=model)
 
 
-def get_output_file(audio_file: str, output_dir: str = ".") -> str:
-    # Get TXT output file path for audio file
+def get_output_files(audio_file: str, output_dir: str = ".") -> dict:
+    # Return both TXT and JSON output file paths for a given audio file
     base_name = os.path.splitext(os.path.basename(audio_file))[0]
-    return os.path.join(output_dir, f"{base_name}.txt")
-
+    return {
+        "txt": os.path.join(output_dir, f"{base_name}.txt"),
+        "json": os.path.join(output_dir, f"{base_name}.json")
+    }
 
 def write_transcription_json(
     audio_file: str,
     segments: list,
     info,
+    json_file: str,
     device: str = None,
-    output_dir: str = ".",
     transcription_time_sec: float = None
 ) -> str:
-    # Determine the output JSON file path
-    base_name = os.path.splitext(os.path.basename(audio_file))[0]
-    output_file = os.path.join(output_dir, f"{base_name}.json")
 
+    # Write transcription metadata to a JSON file.
     # Calculate total duration of transcribed segments (speech) in seconds
     vad_filtered_duration_sec = sum(seg["end"] - seg["start"] for seg in segments)
+
     # Get total audio duration from info object
     duration_sec = getattr(info, "duration", 0) if getattr(info, "duration", None) else 0
 
     # Convert durations from seconds to minutes
     duration_min = duration_sec / 60
     vad_filtered_duration_min = vad_filtered_duration_sec / 60
+
     # Remaining audio considered non-speech (or filtered out)
     speech_duration = duration_min - vad_filtered_duration_min
 
@@ -89,10 +91,10 @@ def write_transcription_json(
     }
 
     # Write JSON file
-    with open(output_file, "w", encoding="utf-8") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-    return output_file
+    return json_file
 
 
 def collect_audio_files(input_path: str, limit: int = None) -> List[str]:
