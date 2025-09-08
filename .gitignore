@@ -1,4 +1,3 @@
-*.mp4
-*txt
-*.json
 .idea
+__pycache__
+transcriptions
