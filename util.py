@@ -65,12 +65,12 @@ def write_transcription_json(
     speech_duration_sec = sum(seg["end"] - seg["start"] for seg in segments)
 
     # Duration of audio filtered out by VAD
-    vad_filtered_duration_sec = max(duration_sec - speech_duration_sec, 0)
+    non_speech_duration_sec = max(duration_sec - speech_duration_sec, 0)
 
     # Convert to minutes
     duration_min = duration_sec / 60
-    speech_duration = speech_duration_sec / 60
-    vad_filtered_duration_min = vad_filtered_duration_sec / 60
+    speech_duration_min = speech_duration_sec / 60
+    non_speech_duration_min = non_speech_duration_sec / 60
 
     # Compute recognition speed
     recognition_speed = None
@@ -81,8 +81,8 @@ def write_transcription_json(
         "audio_file": audio_file,
         "device": device,
         "audio_duration_min": duration_min,
-        "non_speech_duration_min": vad_filtered_duration_min,
-        "speech_duration_min": speech_duration,
+        "non_speech_duration_min": non_speech_duration_min,
+        "speech_duration_min": speech_duration_min,
         "recognition_speed": recognition_speed,
         "language": info.language,
         "language_probability": info.language_probability,
