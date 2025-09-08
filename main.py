@@ -3,6 +3,7 @@
 import os
 import argparse
 import time
+import json
 from util import (
     load_config,
     setup_logger,
@@ -12,7 +13,6 @@ from util import (
     write_transcription_json,
     collect_audio_files
 )
-
 
 def parse_args():
     # Parse command-line arguments
@@ -89,17 +89,33 @@ def main():
     # Collect audio files from input path
     audio_files = collect_audio_files(args.input_path, args.limit)
 
+    recognition_speeds = []  # <-- List to store recognition_speed for each file
+
     # Transcribe each file
     for audio_file in audio_files:
         if logger:
             logger.info(f"Processing {audio_file}...")
-        transcribe_file(model, audio_file, output_dir,
-                        beam_size=config.get("beam_size", 5),
-                        language=config.get("language", None),
-                        vad_filter=config.get("vad_filter", False),
-                        logger=logger,
-                        device=device)
+        txt_file, json_file = transcribe_file(
+            model, audio_file, output_dir,
+            beam_size=config.get("beam_size", 5),
+            language=config.get("language", None),
+            vad_filter=config.get("vad_filter", False),
+            logger=logger,
+            device=device
+        )
 
+        # Read recognition_speed from JSON
+        with open(json_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if data.get("recognition_speed") is not None:
+                recognition_speeds.append(data["recognition_speed"])
+
+    # Compute and print average recognition_speed
+    if recognition_speeds:
+        avg_speed = sum(recognition_speeds) / len(recognition_speeds)
+        print(f"\nAverage recognition speed: {avg_speed:.2f}")
+    else:
+        print("\nNo recognition speed data available.")
 
 if __name__ == "__main__":
     main()
