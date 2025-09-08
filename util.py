@@ -2,6 +2,7 @@ import os
 import yaml
 import logging
 import torch
+import json
 from faster_whisper import WhisperModel
 
 def load_config(path="config.yaml"):
@@ -36,3 +37,22 @@ def write_transcription(segments, output_file="transcription.txt"):
 def get_output_file(audio_file, output_dir="."):
     base_name = os.path.splitext(os.path.basename(audio_file))[0]
     return os.path.join(output_dir, f"{base_name}.txt")
+
+def write_transcription_json(audio_file, segments, info, output_dir="."):
+    base_name = os.path.splitext(os.path.basename(audio_file))[0]
+    output_file = os.path.join(output_dir, f"{base_name}.json")
+
+    data = {
+        "audio_file": audio_file,
+        "language": info.language,
+        "language_probability": info.language_probability,
+        "segments": [
+            {"start": segment.start, "end": segment.end, "text": segment.text}
+            for segment in segments
+        ]
+    }
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+    return output_file
