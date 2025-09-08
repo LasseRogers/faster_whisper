@@ -4,15 +4,17 @@ import os
 import argparse
 import time
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from util import (
     load_config,
     setup_logger,
     get_device,
-    load_model,
+    load_batched_model,
     get_output_file,
     write_transcription_json,
     collect_audio_files
 )
+
 
 def parse_args():
     # Parse command-line arguments
@@ -23,17 +25,23 @@ def parse_args():
     return parser.parse_args()
 
 
-def transcribe_file(model, audio_file, output_dir, beam_size=5, language=None, vad_filter=False, logger=None, device=None):
+def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None, vad_filter=False, logger=None, device=None):
     # Determine the output TXT file path
     txt_file = get_output_file(audio_file, output_dir)
-    segments_data = []  # Store segment info for JSON
 
-    start_time = time.time()  # Start timing transcription
+    # Store segment info for JSON output
+    segments_data = []
+
+    # Start timing transcription
+    start_time = time.time()
 
     with open(txt_file, "w", encoding="utf-8") as f:
-        # Transcribe audio using the model
-        segments_generator, info = model.transcribe(
-            audio_file, beam_size=beam_size, language=language, vad_filter=vad_filter
+        # Transcribe audio using batched inference
+        segments, info = model.transcribe(
+            audio_file,
+            batch_size=batch_size,
+            language=language,
+            vad_filter=vad_filter
         )
 
         # Log detected or specified language
@@ -42,9 +50,9 @@ def transcribe_file(model, audio_file, output_dir, beam_size=5, language=None, v
             logger.info(f"{lang_msg} language '{info.language}' (probability {info.language_probability})")
 
         # Process each segment
-        for segment in segments_generator:
+        for segment in segments:
+            # Format: [start_time -> end_time] transcribed_text
             line = "[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text)
-            #print(line)
             f.write(line + "\n")  # Write segment to TXT file
             segments_data.append({"start": segment.start, "end": segment.end, "text": segment.text})
 
@@ -71,7 +79,6 @@ def transcribe_file(model, audio_file, output_dir, beam_size=5, language=None, v
     return txt_file, json_file
 
 
-
 def main():
     # Main program
     args = parse_args()
@@ -84,31 +91,35 @@ def main():
     if logger:
         logger.info(f"Using device: {device}")
 
-    model = load_model(config.get("model_size", "large-v3"), device)
+    model = load_batched_model(config.get("model_size", "large-v3"), device)
+    batch_size = config.get("batch_size", 16)
+    language = config.get("language", None)
+    vad_filter = config.get("vad_filter", False)
 
     # Collect audio files from input path
     audio_files = collect_audio_files(args.input_path, args.limit)
 
-    recognition_speeds = []  # <-- List to store recognition_speed for each file
+    recognition_speeds = []  # Store recognition_speed for each file
 
-    # Transcribe each file
-    for audio_file in audio_files:
-        if logger:
-            logger.info(f"Processing {audio_file}...")
-        txt_file, json_file = transcribe_file(
-            model, audio_file, output_dir,
-            beam_size=config.get("beam_size", 5),
-            language=config.get("language", None),
-            vad_filter=config.get("vad_filter", False),
-            logger=logger,
-            device=device
-        )
+    # Use ThreadPoolExecutor to process multiple files in parallel
+    with ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(transcribe_file, model, audio_file, output_dir, batch_size, language, vad_filter, logger, device): audio_file
+            for audio_file in audio_files
+        }
 
-        # Read recognition_speed from JSON
-        with open(json_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if data.get("recognition_speed") is not None:
-                recognition_speeds.append(data["recognition_speed"])
+        for future in as_completed(futures):
+            audio_file = futures[future]
+            try:
+                txt_file, json_file = future.result()
+                # Read recognition_speed from JSON
+                with open(json_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("recognition_speed") is not None:
+                        recognition_speeds.append(data["recognition_speed"])
+            except Exception as e:
+                if logger:
+                    logger.error(f"Failed to process {audio_file}: {e}")
 
     # Compute and print average recognition_speed
     if recognition_speeds:
@@ -116,6 +127,7 @@ def main():
         print(f"\nAverage recognition speed: {avg_speed:.2f}")
     else:
         print("\nNo recognition speed data available.")
+
 
 if __name__ == "__main__":
     main()

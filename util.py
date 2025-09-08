@@ -3,7 +3,7 @@ import yaml
 import logging
 import torch
 import json
-from faster_whisper import WhisperModel
+from faster_whisper import WhisperModel, BatchedInferencePipeline
 from typing import List
 
 # Supported audio file extensions
@@ -34,10 +34,11 @@ def get_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def load_model(model_size: str, device: str) -> WhisperModel:
-    # Load Whisper model with appropriate precision
+def load_batched_model(model_size: str, device: str) -> BatchedInferencePipeline:
+    # Load Whisper model and wrap it in a batched inference pipeline
     compute_type = "float16" if device == "cuda" else "int8"
-    return WhisperModel(model_size, device=device, compute_type=compute_type)
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    return BatchedInferencePipeline(model=model)
 
 
 def get_output_file(audio_file: str, output_dir: str = ".") -> str:
@@ -92,6 +93,7 @@ def write_transcription_json(
         json.dump(data, f, ensure_ascii=False, indent=4)
 
     return output_file
+
 
 def collect_audio_files(input_path: str, limit: int = None) -> List[str]:
     # Get all audio files from folder or single file

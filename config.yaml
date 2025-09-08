@@ -1,5 +1,5 @@
 model_size: "large-v3"
-beam_size: 5
+batch_size: 16
 language: "da"
 vad_filter: true
 logging_enabled: true
