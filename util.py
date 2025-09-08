@@ -46,31 +46,52 @@ def get_output_file(audio_file: str, output_dir: str = ".") -> str:
     return os.path.join(output_dir, f"{base_name}.txt")
 
 
-def write_transcription_json(audio_file: str, segments: List[Dict], info, device: str = None, output_dir: str = ".") -> str:
-    # Save transcription and metadata as JSON
+def write_transcription_json(
+    audio_file: str,
+    segments: list,
+    info,
+    device: str = None,
+    output_dir: str = ".",
+    transcription_time_sec: float = None
+) -> str:
+    # Determine the output JSON file path
     base_name = os.path.splitext(os.path.basename(audio_file))[0]
     output_file = os.path.join(output_dir, f"{base_name}.json")
 
-    # Compute VAD-filtered duration
+    # Calculate total duration of transcribed segments (speech) in seconds
     vad_filtered_duration_sec = sum(seg["end"] - seg["start"] for seg in segments)
-    duration_min = getattr(info, "duration", 0) / 60 if getattr(info, "duration", None) else None
-    vad_filtered_duration_min = vad_filtered_duration_sec / 60
+    # Get total audio duration from info object
+    duration_sec = getattr(info, "duration", 0) if getattr(info, "duration", None) else 0
 
+    # Convert durations from seconds to minutes
+    duration_min = duration_sec / 60
+    vad_filtered_duration_min = vad_filtered_duration_sec / 60
+    # Remaining audio considered non-speech (or filtered out)
+    speech_duration = duration_min - vad_filtered_duration_min
+
+    # Compute recognition speed
+    recognition_speed = None
+    if transcription_time_sec and transcription_time_sec > 0:
+        recognition_speed = speech_duration * 60 / transcription_time_sec  # speech_duration is in min, convert to sec
+
+    # Build JSON data
     data = {
         "audio_file": audio_file,
         "device": device,
         "duration": duration_min,
         "vad_filtered_duration": vad_filtered_duration_min,
+        "speech_duration": speech_duration,
+        "recognition_speed": recognition_speed,
         "language": info.language,
         "language_probability": info.language_probability,
         "segments": segments
     }
 
+    # Write JSON file
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
     return output_file
-
 
 def collect_audio_files(input_path: str, limit: int = None) -> List[str]:
     # Get all audio files from folder or single file

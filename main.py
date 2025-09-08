@@ -2,6 +2,7 @@
 
 import os
 import argparse
+import time
 from util import (
     load_config,
     setup_logger,
@@ -23,33 +24,52 @@ def parse_args():
 
 
 def transcribe_file(model, audio_file, output_dir, beam_size=5, language=None, vad_filter=False, logger=None, device=None):
-    # Transcribe a single audio file
+    # Determine the output TXT file path
     txt_file = get_output_file(audio_file, output_dir)
-    segments_data = []
+    segments_data = []  # Store segment info for JSON
+
+    start_time = time.time()  # Start timing transcription
 
     with open(txt_file, "w", encoding="utf-8") as f:
-        segments_generator, info = model.transcribe(audio_file, beam_size=beam_size,
-                                                    language=language, vad_filter=vad_filter)
+        # Transcribe audio using the model
+        segments_generator, info = model.transcribe(
+            audio_file, beam_size=beam_size, language=language, vad_filter=vad_filter
+        )
+
+        # Log detected or specified language
         if logger:
             lang_msg = "Specified" if language else "Auto-detected"
             logger.info(f"{lang_msg} language '{info.language}' (probability {info.language_probability})")
 
-        # Write segments to TXT and store for JSON
+        # Process each segment
         for segment in segments_generator:
             line = "[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text)
             #print(line)
-            f.write(line + "\n")
+            f.write(line + "\n")  # Write segment to TXT file
             segments_data.append({"start": segment.start, "end": segment.end, "text": segment.text})
+
+    # Calculate total transcription time
+    transcription_time_sec = time.time() - start_time
 
     if logger:
         logger.info(f"Text transcription saved to {txt_file}")
 
-    # Save JSON metadata
-    json_file = write_transcription_json(audio_file, segments_data, info, device=device, output_dir=output_dir)
+    # Save metadata and durations to JSON
+    json_file = write_transcription_json(
+        audio_file,
+        segments_data,
+        info,
+        device=device,
+        output_dir=output_dir,
+        transcription_time_sec=transcription_time_sec
+    )
+
     if logger:
         logger.info(f"Transcription and metadata saved to {json_file}")
 
+    # Return paths to TXT and JSON files
     return txt_file, json_file
+
 
 
 def main():
