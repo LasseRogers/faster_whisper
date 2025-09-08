@@ -42,7 +42,7 @@ def load_batched_model(model_size: str, device: str) -> BatchedInferencePipeline
 
 
 def get_output_files(audio_file: str, output_dir: str = ".") -> dict:
-    # Return both TXT and JSON output file paths for a given audio file
+    # Return TXT and JSON output file paths for a given audio file
     base_name = os.path.splitext(os.path.basename(audio_file))[0]
     return {
         "txt": os.path.join(output_dir, f"{base_name}.txt"),
@@ -50,6 +50,7 @@ def get_output_files(audio_file: str, output_dir: str = ".") -> dict:
     }
 
 def write_transcription_json(
+    # Write transcription metadata to a JSON file.
     audio_file: str,
     segments: list,
     info,
@@ -58,7 +59,6 @@ def write_transcription_json(
     transcription_time_sec: float = None
 ) -> str:
 
-    # Write transcription metadata to a JSON file.
     # Calculate total duration of transcribed segments (speech) in seconds
     vad_filtered_duration_sec = sum(seg["end"] - seg["start"] for seg in segments)
 
@@ -69,7 +69,7 @@ def write_transcription_json(
     duration_min = duration_sec / 60
     vad_filtered_duration_min = vad_filtered_duration_sec / 60
 
-    # Remaining audio considered non-speech (or filtered out)
+    # Remaining audio considered non-speech
     speech_duration = duration_min - vad_filtered_duration_min
 
     # Compute recognition speed
