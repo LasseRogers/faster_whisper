@@ -4,7 +4,7 @@ import logging
 import torch
 import json
 from faster_whisper import WhisperModel
-from typing import List, Dict
+from typing import List
 
 # Supported audio file extensions
 SUPPORTED_EXTENSIONS = ('.mp3', '.mp4', '.wav', '.flac', '.ts', '.mpeg', '.mpeg2')
