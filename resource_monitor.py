@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import json
 import time
 import psutil
@@ -9,7 +8,6 @@ import threading
 import warnings
 import os
 
-# Ignore FutureWarnings in this script
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 try:
@@ -87,6 +85,11 @@ def main():
         stop_event.set()
         monitor_thread.join()
 
+        # Check if the file exists and print appropriate message
+        if os.path.exists("system_resources.json"):
+            print(f"\nsystem_resources successfully saved to {os.path.abspath('system_resources.json')}")
+        else:
+            print("\nFailed to generate system_resources.json")
 
 if __name__ == "__main__":
     main()
