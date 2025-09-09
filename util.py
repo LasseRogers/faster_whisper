@@ -71,6 +71,7 @@ def write_transcription_json(
     duration_min = duration_sec / 60
     speech_duration_min = speech_duration_sec / 60
     non_speech_duration_min = non_speech_duration_sec / 60
+    run_time_min = transcription_time_sec / 60 if transcription_time_sec else None
 
     # Compute recognition speed
     recognition_speed = None
@@ -84,6 +85,7 @@ def write_transcription_json(
         "audio_duration_min": duration_min,
         "non_speech_duration_min": non_speech_duration_min,
         "speech_duration_min": speech_duration_min,
+        "run_time_min": run_time_min,
         "recognition_speed": recognition_speed,
         "language": info.language,
         "language_probability": info.language_probability,
