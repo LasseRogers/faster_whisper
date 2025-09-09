@@ -77,6 +77,7 @@ def write_transcription_json(
     if transcription_time_sec and transcription_time_sec > 0:
         recognition_speed = speech_duration_sec / transcription_time_sec
 
+    # Build JSON schema
     data = {
         "audio_file": audio_file,
         "device": device,
@@ -89,11 +90,11 @@ def write_transcription_json(
         "segments": segments
     }
 
+    # Save JSON
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
     return json_file
-
 
 
 def collect_audio_files(input_path: str, limit: int = None) -> List[str]:

@@ -94,20 +94,33 @@ def main():
     if logger:
         logger.info(f"Using device: {device}")
 
+    # Load Whisper model and settings from config
     model = load_batched_model(config.get("model_size", "large-v3"), device)
     batch_size = config.get("batch_size", 16)
     language = config.get("language", None)
     vad_filter = config.get("vad_filter", False)
+    workers = config.get("workers", None)  # Number of parallel workers from config
 
     # Collect audio files from input path
     audio_files = collect_audio_files(args.input_path, args.limit)
 
-    recognition_speeds = []  # Store recognition_speed for each file
+    # Store recognition_speed for each file
+    recognition_speeds = []
 
     # Use ThreadPoolExecutor to process multiple files in parallel
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(transcribe_file, model, audio_file, output_dir, batch_size, language, vad_filter, logger, device): audio_file
+            executor.submit(
+                transcribe_file,
+                model,
+                audio_file,
+                output_dir,
+                batch_size,
+                language,
+                vad_filter,
+                logger,
+                device
+            ): audio_file
             for audio_file in audio_files
         }
 
