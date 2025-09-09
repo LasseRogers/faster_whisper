@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 import os
 import argparse
 import time
