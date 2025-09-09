@@ -1,13 +1,14 @@
 ## Requirements
 - Python 3.8+
- - Dependencies:
- - faster-whisper
- - torch
- - psutil
- - pynvml (optional, for GPU monitoring)
- - librosa
- - matplotlib
- - pyyaml
+- Dependencies:
+
+    - faster-whisper
+    - torch
+    - psutil
+    - pynvml (optional, for GPU monitoring)
+    - librosa
+    - matplotlib
+    - pyyaml
 
 ## Usage
 The `resource_monitor.py` script allows you to monitor system resources while running transcription jobs.
