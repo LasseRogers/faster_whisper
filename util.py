@@ -6,6 +6,13 @@ import json
 from faster_whisper import WhisperModel, BatchedInferencePipeline
 from typing import List
 
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")  # For headless backend
+import librosa
+import librosa.display
+import numpy as np
+
 # Supported audio file extensions
 SUPPORTED_EXTENSIONS = ('.mp3', '.mp4', '.wav', '.flac', '.ts', '.mpeg', '.mpeg2')
 
@@ -109,3 +116,49 @@ def collect_audio_files(input_path: str, limit: int = None) -> List[str]:
     else:
         raise FileNotFoundError("No valid audio files found.")
     return files[:limit] if limit else files
+
+def plot_waveform_with_vad(audio_file: str, segments: list, output_dir: str):
+    # Load audio
+    y, sr = librosa.load(audio_file, sr=None, mono=True)
+
+    if len(y) == 0:
+        raise ValueError(f"No audio data found in {audio_file}")
+
+    # Downsample for plotting speed (max 100k points)
+    max_points = 100_000
+    if len(y) > max_points:
+        hop = len(y) // max_points
+        y = y[::hop]
+        times = (np.arange(len(y)) * hop / sr) / 60.0  # convert to minutes
+    else:
+        times = (np.arange(len(y)) / sr) / 60.0  # convert to minutes
+
+    # Create plot
+    plt.figure(figsize=(12, 4))
+    plt.plot(times, y, alpha=0.7, label="Waveform")
+
+    # Sort segments
+    segments = sorted(segments, key=lambda s: s["start"])
+
+    # Mark speech (green) and non-speech (red) in minutes
+    last_end = 0.0
+    for seg in segments:
+        if seg["start"] > last_end:
+            plt.axvspan(last_end / 60.0, seg["start"] / 60.0, color="red", alpha=0.2)
+        plt.axvspan(seg["start"] / 60.0, seg["end"] / 60.0, color="green", alpha=0.3)
+        last_end = seg["end"]
+
+    duration_min = times[-1]
+    if last_end / 60.0 < duration_min:
+        plt.axvspan(last_end / 60.0, duration_min, color="red", alpha=0.2)
+
+    plt.title(f"Waveform with VAD Segments: {os.path.basename(audio_file)}")
+    plt.xlabel("Time (minutes)")
+    plt.ylabel("Amplitude")
+
+    base_name = os.path.splitext(os.path.basename(audio_file))[0]
+    plot_file = os.path.join(output_dir, f"{base_name}_waveform.png")
+    plt.savefig(plot_file, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    return plot_file

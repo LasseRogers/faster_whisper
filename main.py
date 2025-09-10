@@ -15,7 +15,8 @@ from util import (
     load_batched_model,
     get_output_files,
     write_transcription_json,
-    collect_audio_files
+    collect_audio_files,
+    plot_waveform_with_vad
 )
 
 
@@ -28,7 +29,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None, vad_filter=False, logger=None, device=None):
+def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None, vad_filter=False, logger=None,
+                    device=None, config=None):
     # Get both TXT and JSON output paths
     files = get_output_files(audio_file, output_dir)
     txt_file = files["txt"]
@@ -81,6 +83,16 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
     if logger:
         logger.info(f"Transcription and metadata saved to {json_file}")
 
+    # Plot waveform with VAD segments if enabled
+    if config.get("waveform_plot_enable", False):
+        try:
+            plot_file = plot_waveform_with_vad(audio_file, segments_data, output_dir)
+            if logger:
+                logger.info(f"Waveform plot saved to {plot_file}")
+        except Exception as e:
+            if logger:
+                logger.error(f"Failed to plot waveform for {audio_file}: {e}")
+
     # Return paths to TXT and JSON files
     return txt_file, json_file
 
@@ -122,7 +134,8 @@ def main():
                 language,
                 vad_filter,
                 logger,
-                device
+                device,
+                config
             ): audio_file
             for audio_file in audio_files
         }

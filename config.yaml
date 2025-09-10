@@ -4,3 +4,4 @@ language: "da"
 vad_filter: true
 logging_enabled: true
 workers: 5
+waveform_plot_enable: true
