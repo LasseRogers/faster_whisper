@@ -2,6 +2,7 @@
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.filterwarnings("ignore", message="PySoundFile failed. Trying audioread instead.")
 
 import os
 import argparse
