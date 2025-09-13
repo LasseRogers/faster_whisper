@@ -2,16 +2,15 @@
 
 import jiwer
 import sys
-from itertools import zip_longest
+import difflib
 
 # ANSI colors
-RED = "\033[92m"   # word in reference
-GREEN = "\033[91m"  # word in hypothesis
+RED = "\033[91m"
 RESET = "\033[0m"
 
 def read_file(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
-        return f.readlines()  # Keep line structure
+        return f.readlines()
 
 def clean_words(text):
     transforms = jiwer.Compose([
@@ -19,9 +18,29 @@ def clean_words(text):
         jiwer.ToLowerCase(),
         jiwer.RemoveMultipleSpaces(),
         jiwer.Strip(),
-        jiwer.RemovePunctuation(),
     ])
     return transforms(text).split()
+
+def highlight_diff(ref_words, hyp_words):
+    matcher = difflib.SequenceMatcher(None, ref_words, hyp_words)
+    ref_colored = []
+    hyp_colored = []
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            ref_colored.extend(ref_words[i1:i2])
+            hyp_colored.extend(hyp_words[j1:j2])
+        elif tag == "replace":
+            ref_colored.extend(f"{RED}{w}{RESET}" for w in ref_words[i1:i2])
+            hyp_colored.extend(f"{RED}{w}{RESET}" for w in hyp_words[j1:j2])
+        elif tag == "delete":
+            ref_colored.extend(f"{RED}{w}{RESET}" for w in ref_words[i1:i2])
+            hyp_colored.append(f"{RED}<MISSING>{RESET}")
+        elif tag == "insert":
+            ref_colored.append(f"{RED}<MISSING>{RESET}")
+            hyp_colored.extend(f"{RED}{w}{RESET}" for w in hyp_words[j1:j2])
+
+    return " ".join(ref_colored), " ".join(hyp_colored)
 
 def main():
     if len(sys.argv) != 3:
@@ -31,7 +50,6 @@ def main():
     ref_lines = read_file(sys.argv[1])
     hyp_lines = read_file(sys.argv[2])
 
-    # Pad shorter file with empty lines
     max_lines = max(len(ref_lines), len(hyp_lines))
     while len(ref_lines) < max_lines:
         ref_lines.append("\n")
@@ -41,8 +59,6 @@ def main():
     total_ref_words = []
     total_hyp_words = []
 
-    print("Differences by line:\n")
-
     for lineno, (ref_line, hyp_line) in enumerate(zip(ref_lines, hyp_lines), 1):
         ref_words = clean_words(ref_line)
         hyp_words = clean_words(hyp_line)
@@ -50,26 +66,14 @@ def main():
         total_ref_words.extend(ref_words)
         total_hyp_words.extend(hyp_words)
 
-        # Only show lines with differences
         if ref_words != hyp_words:
-            colored_ref = []
-            colored_hyp = []
-            for r, h in zip_longest(ref_words, hyp_words, fillvalue="<missing>"):
-                if r != h:
-                    colored_ref.append(f"{RED}{r}{RESET}")
-                    colored_hyp.append(f"{GREEN}{h}{RESET}")
-                else:
-                    colored_ref.append(r)
-                    colored_hyp.append(h)
-
+            ref_colored, hyp_colored = highlight_diff(ref_words, hyp_words)
             print(f"Line {lineno}:")
-            print("Reference: ", " ".join(colored_ref))
-            print("Hypothesis:", " ".join(colored_hyp))
-            print()
+            print("Reference: ", ref_colored)
+            print("Hypothesis:", hyp_colored)
 
-    # Compute overall WER
-    overall_wer = jiwer.wer(total_ref_words, total_hyp_words)
-    print(f"WER: {overall_wer:.2%}")
+    wer = jiwer.wer(" ".join(total_ref_words), " ".join(total_hyp_words))
+    print(f"\nWER: {wer:.2%}")
 
 if __name__ == "__main__":
     main()
