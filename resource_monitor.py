@@ -35,7 +35,7 @@ def get_gpu_usage():
             "memory_used_MB": mem_info.used / 1024**2,
             "memory_free_MB": mem_info.free / 1024**2,
             "gpu_utilization_percent": util.gpu,
-            "memory_utilization_percent": util.memory
+            "memory_controller": util.memory
         })
     return gpu_data
 
@@ -60,12 +60,12 @@ def monitor_resources(peaks: dict, interval=1, stop_event=None):
                     "memory_used_MB": 0,
                     "memory_free_MB": gpu["memory_total_MB"],  # start with max
                     "gpu_utilization_percent": 0,
-                    "memory_utilization_percent": 0
+                    "memory_controller": 0
                 })
                 gpu_peak["memory_used_MB"] = max(gpu_peak["memory_used_MB"], gpu["memory_used_MB"])
                 gpu_peak["memory_free_MB"] = min(gpu_peak["memory_free_MB"], gpu["memory_free_MB"])
                 gpu_peak["gpu_utilization_percent"] = max(gpu_peak["gpu_utilization_percent"], gpu["gpu_utilization_percent"])
-                gpu_peak["memory_utilization_percent"] = max(gpu_peak["memory_utilization_percent"], gpu["memory_utilization_percent"])
+                gpu_peak["memory_controller"] = max(gpu_peak["memory_controller"], gpu["memory_controller"])
 
         time.sleep(interval)
 
