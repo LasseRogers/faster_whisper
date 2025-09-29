@@ -10,10 +10,9 @@ import subprocess
 import sys
 import threading
 import os
-
+import pynvml
 
 try:
-    import pynvml
     pynvml.nvmlInit()
     GPU_AVAILABLE = True
 except (ImportError, ModuleNotFoundError, pynvml.NVMLError):
