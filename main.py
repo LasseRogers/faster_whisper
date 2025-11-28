@@ -49,7 +49,8 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
             audio_file,
             batch_size=batch_size,
             language=language,
-            vad_filter=vad_filter
+            vad_filter=vad_filter,
+            word_timestamps=True
         )
 
         # Log detected or specified language
