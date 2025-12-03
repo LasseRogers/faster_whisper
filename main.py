@@ -86,14 +86,14 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
         logger.info(f"Transcription and metadata saved to {json_file}")
 
     # Plot waveform with VAD segments if enabled
-    if config.get("waveform_plot_enable", False):
+    if config.get("vad_plot_enable", False):
         try:
             plot_file = plot_waveform_with_vad(audio_file, segments_data, output_dir)
             if logger:
-                logger.info(f"Waveform plot saved to {plot_file}")
+                logger.info(f"VAD plot saved to {plot_file}")
         except Exception as e:
             if logger:
-                logger.error(f"Failed to plot waveform for {audio_file}: {e}")
+                logger.error(f"Failed to produce VAD plot for {audio_file}: {e}")
 
     # Return paths to TXT and JSON files
     return txt_file, json_file
