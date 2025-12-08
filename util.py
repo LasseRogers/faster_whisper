@@ -48,14 +48,6 @@ def load_batched_model(model_size: str, device: str) -> BatchedInferencePipeline
     return BatchedInferencePipeline(model=model)
 
 
-def get_output_files(audio_file: str, output_dir: str = ".") -> dict:
-    # Return TXT and JSON output file paths for a given audio file
-    base_name = os.path.splitext(os.path.basename(audio_file))[0]
-    return {
-        "txt": os.path.join(output_dir, f"{base_name}.txt"),
-        "json": os.path.join(output_dir, f"{base_name}.json")
-    }
-
 def write_transcription_json(
     # Write transcription segments and metadata to JSON
     audio_file: str,
@@ -116,6 +108,7 @@ def collect_audio_files(input_path: str, limit: int = None) -> List[str]:
     else:
         raise FileNotFoundError("No valid audio files found.")
     return files[:limit] if limit else files
+
 
 def plot_waveform_with_vad(audio_file: str, segments: list, output_dir: str):
     # Load audio
