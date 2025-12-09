@@ -55,7 +55,7 @@ def collect_audio_files(input_path, limit=None):
     else:
         raise FileNotFoundError("No valid audio files found.")
 
-    files.sort()  # Sort for consistent ordering
+    files.sort()
     return files[:limit] if limit else files
 
 
@@ -97,7 +97,7 @@ def write_transcription_json(audio_file, segments, json_file, device=None,
 
 def transcribe_file(model, audio_file, output_dir, language=None, device=None, gpu_id=None):
     """Transcribe a single audio file using base Whisper"""
-    # Create a subfolder for this audio file
+    # Create a subfolder for each audio file
     base_name = os.path.splitext(os.path.basename(audio_file))[0]
     file_output_dir = os.path.join(output_dir, base_name)
     os.makedirs(file_output_dir, exist_ok=True)
