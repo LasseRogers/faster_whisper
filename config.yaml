@@ -2,6 +2,4 @@ model_size: "large-v3"
 batch_size: 16
 language: "da"
 vad_filter: true
-logging_enabled: true
-workers: 5
 vad_plot_enable: true
