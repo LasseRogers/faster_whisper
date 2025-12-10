@@ -211,6 +211,9 @@ def main():
 
     print("\nStarting transcription...\n")
 
+    # Start timing total processing
+    total_start_time = time.time()
+
     # Store all recognition speeds
     all_recognition_speeds = []
 
@@ -235,6 +238,10 @@ def main():
             except Exception as e:
                 print(f"Worker process failed: {e}")
 
+    # Get total time
+    total_elapsed_time = time.time() - total_start_time
+    total_minutes = total_elapsed_time / 60
+
     # Compute and print average recognition_speed
     print("\n" + "=" * 50)
     if all_recognition_speeds:
@@ -243,6 +250,10 @@ def main():
         print(f"Total files processed: {len(all_recognition_speeds)}")
     else:
         print("No recognition speed data available.")
+    print("=" * 50)
+
+    # Print total time
+    print(f"Total processing time: {total_minutes:.2f} minutes ({total_elapsed_time:.1f} seconds)")
     print("=" * 50)
 
 
