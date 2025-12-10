@@ -214,8 +214,9 @@ def main():
     # Start timing total processing
     total_start_time = time.time()
 
-    # Store all recognition speeds
+    # Store all recognition speeds and per-GPU stats
     all_recognition_speeds = []
+    gpu_stats = {}
 
     # Use multiprocessing to spawn one process per GPU
     with mp.Pool(processes=num_gpus) as pool:
@@ -234,7 +235,23 @@ def main():
         for task in tasks:
             try:
                 result = task.get()
-                all_recognition_speeds.extend(result['recognition_speeds'])
+                gpu_id = result['gpu_id']
+                speeds = result['recognition_speeds']
+
+                # Store per-GPU statistics
+                if speeds:
+                    avg_gpu_speed = sum(speeds) / len(speeds)
+                    min_gpu_speed = min(speeds)
+                    max_gpu_speed = max(speeds)
+
+                    gpu_stats[gpu_id] = {
+                        'avg_speed': avg_gpu_speed,
+                        'min_speed': min_gpu_speed,
+                        'max_speed': max_gpu_speed,
+                        'num_files': len(speeds)
+                    }
+
+                all_recognition_speeds.extend(speeds)
             except Exception as e:
                 print(f"Worker process failed: {e}")
 
@@ -242,22 +259,47 @@ def main():
     total_elapsed_time = time.time() - total_start_time
     total_minutes = total_elapsed_time / 60
 
-    # Compute and print average recognition_speed
-    print("\n" + "=" * 50)
+    # Print per-GPU statistics
+    print("\n" + "=" * 70)
+    print("PER-GPU PERFORMANCE STATISTICS")
+    print("=" * 70)
+
+    if gpu_stats:
+        for gpu_id in sorted(gpu_stats.keys()):
+            stats = gpu_stats[gpu_id]
+            print(f"GPU {gpu_id}:")
+            print(f"  Files processed: {stats['num_files']}")
+            print(f"  Average speed:   {stats['avg_speed']:.2f}x realtime")
+            print(f"  Min speed:       {stats['min_speed']:.2f}x realtime")
+            print(f"  Max speed:       {stats['max_speed']:.2f}x realtime")
+            print()
+
+    # Compute and print overall statistics
+    print("=" * 70)
+    print("OVERALL STATISTICS")
+    print("=" * 70)
     if all_recognition_speeds:
         avg_speed = sum(all_recognition_speeds) / len(all_recognition_speeds)
+        min_speed = min(all_recognition_speeds)
+        max_speed = max(all_recognition_speeds)
+
         print(f"Average recognition speed: {avg_speed:.2f}x realtime")
-        print(f"Total files processed: {len(all_recognition_speeds)}")
+        print(f"Min recognition speed:     {min_speed:.2f}x realtime")
+        print(f"Max recognition speed:     {max_speed:.2f}x realtime")
+        print(f"Total files processed:     {len(all_recognition_speeds)}")
+
+        # Calculate effective parallel throughput
+        if len(gpu_stats) > 1:
+            effective_throughput = avg_speed * len(gpu_stats)
+            print(f"Effective parallel throughput: {effective_throughput:.2f}x realtime ({len(gpu_stats)} GPUs)")
     else:
         print("No recognition speed data available.")
-    print("=" * 50)
 
-    # Print total time
+    print("=" * 70)
     print(f"Total processing time: {total_minutes:.2f} minutes ({total_elapsed_time:.1f} seconds)")
-    print("=" * 50)
+    print("=" * 70)
 
 
 if __name__ == "__main__":
-    # Required for multiprocessing on Windows and for proper CUDA handling
     mp.set_start_method('spawn', force=True)
     main()
