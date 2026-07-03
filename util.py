@@ -121,9 +121,9 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
         # Calculate total transcription time
         transcription_time_sec = time.time() - start_time
 
-        # Save metadata to JSON - recognition_speed and run_time_min come back
-        # directly from this call, no need to reopen the file we just wrote.
-        json_file, recognition_speed, run_time_min = write_transcription_json(
+        # Save metadata to JSON - recognition_speed comes back directly from
+        # this call, no need to reopen the file we just wrote.
+        json_file, recognition_speed = write_transcription_json(
             audio_file,
             segments_data,
             info,
@@ -141,8 +141,8 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
             except Exception as e:
                 print(f"[GPU {gpu_id}] Failed to produce VAD plot for {audio_file}: {e}")
 
-        # Return paths to TXT and JSON files, plus recognition_speed and run_time_min
-        return txt_file, json_file, recognition_speed, run_time_min
+        # Return paths to TXT and JSON files, plus recognition_speed
+        return txt_file, json_file, recognition_speed
 
     except Exception:
         # Transcription failed partway through - remove the subfolder we
@@ -176,7 +176,6 @@ def write_transcription_json(
     duration_min = duration_sec / 60
     duration_after_vad_min = duration_after_vad_sec / 60 if duration_after_vad_sec is not None else None
     non_speech_duration_min = non_speech_duration_sec / 60 if non_speech_duration_sec is not None else None
-    run_time_min = transcription_time_sec / 60 if transcription_time_sec else None
 
     # Compute recognition speed, based on faster-whisper's own duration_after_vad
     recognition_speed = None
@@ -204,9 +203,9 @@ def write_transcription_json(
         # duration_after_vad_min: reported directly by faster-whisper's VAD step
         # (converted to minutes to match the other duration fields here)
         "duration_after_vad_min": duration_after_vad_min,
-        # run_time_min and recognition_speed for this individual file are not
-        # stored at the top level - instead they get folded into the "gpu"
-        # and "overall" aggregate stats added later, via add_speed_stats_to_json
+        # recognition_speed for this individual file is not stored at the top
+        # level - instead it gets folded into the "gpu" and "overall"
+        # aggregate stats added later, via add_speed_stats_to_json
         # run_settings: full snapshot of every effective config value used for
         # this run (model_size, batch_size, language, vad_filter, beam_size,
         # workers_per_gpu, output_dir, gpu_ids), accounting for any
@@ -224,10 +223,10 @@ def write_transcription_json(
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-    # Return recognition_speed and run_time_min alongside the file path so
-    # callers don't need to reopen and re-parse the JSON to get these back -
-    # both are used later to build the aggregate "gpu"/"overall" speed_stats.
-    return json_file, recognition_speed, run_time_min
+    # Return recognition_speed alongside the file path so callers don't need
+    # to reopen and re-parse the JSON we just wrote to get this value back -
+    # used later to build the aggregate "gpu"/"overall" speed_stats.
+    return json_file, recognition_speed
 
 
 def write_failed_files_json(failed_results: list, output_dir: str) -> str:
