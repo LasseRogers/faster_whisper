@@ -8,14 +8,14 @@ warnings.filterwarnings("ignore", message="PySoundFile failed. Trying audioread 
 import os
 import argparse
 import time
-import json
 import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from util import (
     load_config,
-    write_transcription_json,
     collect_audio_files,
-    plot_waveform_with_vad
+    get_available_gpus,
+    transcribe_file,
+    write_failed_files_json
 )
 
 
@@ -30,142 +30,40 @@ def parse_args():
                          help="Number of workers per GPU, i.e. files processed concurrently on one GPU (overrides config)")
     parser.add_argument("-b", "--beam-size", type=int, default=None,
                          help="Beam size for decoding (overrides config)")
+    parser.add_argument("-m", "--model-size", type=str, default=None,
+                         help="Whisper model size, e.g. 'large-v3', 'medium', 'small' (overrides config)")
+    parser.add_argument("-bs", "--batch-size", type=int, default=None,
+                         help="Batch size for batched inference (overrides config)")
+    parser.add_argument("-l", "--language", type=str, default=None,
+                         help="Language code, e.g. 'da', 'en' (overrides config)")
+
+    # Booleans: use a mutually exclusive on/off pair per flag so the CLI can
+    # both enable and disable something the config turned on, with "not passed
+    # at all" as a distinct third state that falls back to config.yaml
+    vad_group = parser.add_mutually_exclusive_group()
+    vad_group.add_argument("--vad-filter", dest="vad_filter", action="store_true", default=None,
+                            help="Enable VAD filtering (overrides config)")
+    vad_group.add_argument("--no-vad-filter", dest="vad_filter", action="store_false",
+                            help="Disable VAD filtering (overrides config)")
+
+    plot_group = parser.add_mutually_exclusive_group()
+    plot_group.add_argument("--vad-plot", dest="vad_plot_enable", action="store_true", default=None,
+                             help="Enable VAD waveform plots (overrides config)")
+    plot_group.add_argument("--no-vad-plot", dest="vad_plot_enable", action="store_false",
+                             help="Disable VAD waveform plots (overrides config)")
+
     return parser.parse_args()
 
 
-def get_available_gpus(gpu_arg=None):
-    """Get list of available GPU device IDs"""
-    import torch
-
-    if gpu_arg:
-        # User specified GPUs
-        return [int(g.strip()) for g in gpu_arg.split(',')]
-
-    # Auto-detect all available GPUs
-    if torch.cuda.is_available():
-        return list(range(torch.cuda.device_count()))
-
-    return [0]  # Fallback to single GPU
-
-
-def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None, vad_filter=False,
-                    device=None, config=None, gpu_id=None, beam_size=5, run_settings=None):
-    # Create a subfolder for this audio file
-    base_name = os.path.splitext(os.path.basename(audio_file))[0]
-    file_output_dir = os.path.join(output_dir, base_name)
-    os.makedirs(file_output_dir, exist_ok=True)
-
-    # Get both TXT and JSON output paths
-    txt_file = os.path.join(file_output_dir, f"{base_name}.txt")
-    json_file = os.path.join(file_output_dir, f"{base_name}.json")
-
-    # Store segment info for JSON output
-    segments_data = []
-
-    # Start timing transcription
-    start_time = time.time()
-
-    print(f"[GPU {gpu_id}] Processing {os.path.basename(audio_file)}")
-
-    with open(txt_file, "w", encoding="utf-8") as f:
-        # Transcribe audio using batched inference
-        # NOTE: faster-whisper / CTranslate2 models are safe to call concurrently
-        # from multiple threads on the same model instance - the actual compute
-        # happens in C++ and releases the GIL during inference.
-        segments, info = model.transcribe(
-            audio_file,
-            batch_size=batch_size,
-            language=language,
-            vad_filter=vad_filter,
-            word_timestamps=True,
-            beam_size=beam_size
-        )
-
-        # Process each segment
-        for segment in segments:
-            # Format: [start_time -> end_time] transcribed_text
-            line = "[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text)
-            # Write segment to TXT file
-            f.write(line + "\n")
-
-            # Per-word log-probability info (available since word_timestamps=True)
-            words_data = None
-            if segment.words:
-                words_data = [
-                    {
-                        "word": w.word,
-                        "start": w.start,
-                        "end": w.end,
-                        "probability": w.probability
-                    }
-                    for w in segment.words
-                ]
-
-            segments_data.append({
-                "id": segment.id,
-                "start": segment.start,
-                "end": segment.end,
-                "text": segment.text,
-                # avg_logprob: average log-probability of tokens in this segment
-                # (closer to 0 = more confident, more negative = less confident)
-                "avg_logprob": segment.avg_logprob,
-                # no_speech_prob: model's estimated probability this segment is silence/non-speech
-                "no_speech_prob": segment.no_speech_prob,
-                # compression_ratio: text compression ratio, high values can indicate repetition/looping
-                "compression_ratio": segment.compression_ratio,
-                # temperature: sampling temperature actually used for this segment - Whisper
-                # retries at a higher temperature when a greedy decode fails a quality check,
-                # so a non-zero value here is itself a signal this segment was harder to decode
-                "temperature": segment.temperature,
-                # seek: internal audio-offset marker used by faster-whisper's decoding loop
-                "seek": segment.seek,
-                # tokens: raw token IDs before decoding to text - mainly useful for
-                # custom re-scoring or low-level debugging
-                "tokens": segment.tokens,
-                "words": words_data
-            })
-
-    # Calculate total transcription time
-    transcription_time_sec = time.time() - start_time
-
-    # Save metadata to JSON
-    write_transcription_json(
-        audio_file,
-        segments_data,
-        info,
-        json_file=json_file,
-        device=device,
-        transcription_time_sec=transcription_time_sec,
-        beam_size=beam_size,
-        run_settings=run_settings
-    )
-
-    # Plot waveform with VAD segments if enabled
-    if config.get("vad_plot_enable", False):
-        try:
-            plot_file = plot_waveform_with_vad(audio_file, segments_data, file_output_dir)
-            print(f"[GPU {gpu_id}] VAD plot saved to {plot_file}")
-        except Exception as e:
-            print(f"[GPU {gpu_id}] Failed to produce VAD plot for {audio_file}: {e}")
-
-    # Return paths to TXT and JSON files
-    return txt_file, json_file
-
-
 def _process_one_file(model, audio_file, output_dir, batch_size, language, vad_filter,
-                       device, config, gpu_id, beam_size=5, run_settings=None):
+                       device, gpu_id, run_settings=None):
     """Wrapper used by the thread pool - handles errors per-file so one
     failure doesn't kill the whole batch, and returns a uniform result dict."""
     try:
-        txt_file, json_file = transcribe_file(
+        txt_file, json_file, recognition_speed = transcribe_file(
             model, audio_file, output_dir, batch_size, language, vad_filter,
-            device, config, gpu_id, beam_size, run_settings
+            device, gpu_id, run_settings
         )
-
-        recognition_speed = None
-        with open(json_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            recognition_speed = data.get("recognition_speed")
 
         print(f"[GPU {gpu_id}] ✓ Completed {os.path.basename(audio_file)}")
 
@@ -189,7 +87,7 @@ def _process_one_file(model, audio_file, output_dir, batch_size, language, vad_f
 
 
 def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language, vad_filter,
-               config, workers_per_gpu=1, beam_size=5, run_settings=None):
+               workers_per_gpu=1, run_settings=None):
     """Worker process that handles a specific GPU.
 
     Files assigned to this GPU are processed using a thread pool so that
@@ -220,7 +118,7 @@ def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language
         for audio_file in audio_files:
             result = _process_one_file(
                 batched_model, audio_file, output_dir, batch_size, language,
-                vad_filter, device, config, gpu_id, beam_size, run_settings
+                vad_filter, device, gpu_id, run_settings
             )
             results.append(result)
             if result['recognition_speed'] is not None:
@@ -232,8 +130,7 @@ def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language
             futures = {
                 executor.submit(
                     _process_one_file, batched_model, audio_file, output_dir,
-                    batch_size, language, vad_filter, device, config, gpu_id,
-                    beam_size, run_settings
+                    batch_size, language, vad_filter, device, gpu_id, run_settings
                 ): audio_file
                 for audio_file in audio_files
             }
@@ -265,11 +162,15 @@ def main():
 
     print(f"Using GPUs: {gpu_ids}")
 
-    # Load settings from config
-    model_size = config.get("model_size", "large-v3")
-    batch_size = config.get("batch_size", 16)
-    language = config.get("language", None)
-    vad_filter = config.get("vad_filter", False)
+    # Load settings from config, with CLI flags taking precedence when provided
+    model_size = args.model_size if args.model_size is not None \
+        else config.get("model_size", "large-v3")
+    batch_size = args.batch_size if args.batch_size is not None \
+        else config.get("batch_size", 16)
+    language = args.language if args.language is not None \
+        else config.get("language", None)
+    vad_filter = args.vad_filter if args.vad_filter is not None \
+        else config.get("vad_filter", False)
 
     # Number of workers per GPU, i.e. files processed concurrently on one GPU
     workers_per_gpu = args.workers if args.workers is not None \
@@ -281,6 +182,9 @@ def main():
     beam_size = args.beam_size if args.beam_size is not None \
         else config.get("beam_size", 5)
 
+    vad_plot_enable = args.vad_plot_enable if args.vad_plot_enable is not None \
+        else config.get("vad_plot_enable", False)
+
     # Snapshot of every effective setting used for this run (accounting for any
     # CLI overrides, not just the raw config.yaml) - stored in each output JSON
     # so every transcript is self-documenting about what produced it.
@@ -289,7 +193,7 @@ def main():
         "batch_size": batch_size,
         "language": language,
         "vad_filter": vad_filter,
-        "vad_plot_enable": config.get("vad_plot_enable", False),
+        "vad_plot_enable": vad_plot_enable,
         "workers_per_gpu": workers_per_gpu,
         "beam_size": beam_size,
         "output_dir": output_dir,
@@ -321,8 +225,9 @@ def main():
     # Start timing total processing
     total_start_time = time.time()
 
-    # Store all recognition speeds and per-GPU stats
+    # Store all recognition speeds, per-file results, and per-GPU stats
     all_recognition_speeds = []
+    all_results = []
     gpu_stats = {}
 
     # Use multiprocessing to spawn one process per GPU
@@ -334,7 +239,7 @@ def main():
                 task = pool.apply_async(
                     gpu_worker,
                     (gpu_id, files_per_gpu[i], output_dir, model_size, batch_size,
-                     language, vad_filter, config, workers_per_gpu, beam_size, run_settings)
+                     language, vad_filter, workers_per_gpu, run_settings)
                 )
                 tasks.append(task)
 
@@ -359,6 +264,7 @@ def main():
                     }
 
                 all_recognition_speeds.extend(speeds)
+                all_results.extend(result['results'])
             except Exception as e:
                 print(f"Worker process failed: {e}")
 
@@ -401,6 +307,19 @@ def main():
             print(f"Effective parallel throughput: {effective_throughput:.2f}x realtime ({len(gpu_stats)} GPUs)")
     else:
         print("No recognition speed data available.")
+
+    # Report any files that failed to transcribe
+    failed_results = [r for r in all_results if r['error']]
+    if failed_results:
+        print("=" * 70)
+        print(f"FAILED FILES ({len(failed_results)})")
+        print("=" * 70)
+        for r in failed_results:
+            print(f"  {os.path.basename(r['audio_file'])}: {r['error']}")
+
+        # Persist to disk too, so this list survives beyond the console output
+        failed_file = write_failed_files_json(failed_results, output_dir)
+        print(f"\nFailed files list saved to {failed_file}")
 
     print("=" * 70)
     print(f"Total processing time: {total_minutes:.2f} minutes ({total_elapsed_time:.1f} seconds)")
