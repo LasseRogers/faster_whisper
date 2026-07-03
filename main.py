@@ -15,7 +15,8 @@ from util import (
     collect_audio_files,
     get_available_gpus,
     transcribe_file,
-    write_failed_files_json
+    write_failed_files_json,
+    add_speed_stats_to_json
 )
 
 
@@ -60,7 +61,7 @@ def _process_one_file(model, audio_file, output_dir, batch_size, language, vad_f
     """Wrapper used by the thread pool - handles errors per-file so one
     failure doesn't kill the whole batch, and returns a uniform result dict."""
     try:
-        txt_file, json_file, recognition_speed = transcribe_file(
+        txt_file, json_file, recognition_speed, run_time_min = transcribe_file(
             model, audio_file, output_dir, batch_size, language, vad_filter,
             device, gpu_id, run_settings
         )
@@ -72,7 +73,8 @@ def _process_one_file(model, audio_file, output_dir, batch_size, language, vad_f
             'txt_file': txt_file,
             'json_file': json_file,
             'error': None,
-            'recognition_speed': recognition_speed
+            'recognition_speed': recognition_speed,
+            'run_time_min': run_time_min
         }
 
     except Exception as e:
@@ -82,7 +84,8 @@ def _process_one_file(model, audio_file, output_dir, batch_size, language, vad_f
             'txt_file': None,
             'json_file': None,
             'error': str(e),
-            'recognition_speed': None
+            'recognition_speed': None,
+            'run_time_min': None
         }
 
 
@@ -112,6 +115,7 @@ def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language
 
     results = []
     recognition_speeds = []
+    run_times = []
 
     if workers_per_gpu <= 1:
         # Original sequential behavior
@@ -123,6 +127,8 @@ def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language
             results.append(result)
             if result['recognition_speed'] is not None:
                 recognition_speeds.append(result['recognition_speed'])
+            if result['run_time_min'] is not None:
+                run_times.append(result['run_time_min'])
     else:
         # Concurrent processing: up to `workers_per_gpu` transcriptions
         # in flight on this GPU at once via threads sharing one model.
@@ -140,13 +146,16 @@ def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language
                 results.append(result)
                 if result['recognition_speed'] is not None:
                     recognition_speeds.append(result['recognition_speed'])
+                if result['run_time_min'] is not None:
+                    run_times.append(result['run_time_min'])
 
     print(f"[GPU {gpu_id}] Finished processing {len(audio_files)} files")
 
     return {
         'gpu_id': gpu_id,
         'results': results,
-        'recognition_speeds': recognition_speeds
+        'recognition_speeds': recognition_speeds,
+        'run_times': run_times
     }
 
 
@@ -225,8 +234,9 @@ def main():
     # Start timing total processing
     total_start_time = time.time()
 
-    # Store all recognition speeds, per-file results, and per-GPU stats
+    # Store all recognition speeds, run times, per-file results, and per-GPU stats
     all_recognition_speeds = []
+    all_run_times = []
     all_results = []
     gpu_stats = {}
 
@@ -249,21 +259,21 @@ def main():
                 result = task.get()
                 gpu_id = result['gpu_id']
                 speeds = result['recognition_speeds']
+                run_times = result['run_times']
 
                 # Store per-GPU statistics
                 if speeds:
-                    avg_gpu_speed = sum(speeds) / len(speeds)
-                    min_gpu_speed = min(speeds)
-                    max_gpu_speed = max(speeds)
-
                     gpu_stats[gpu_id] = {
-                        'avg_speed': avg_gpu_speed,
-                        'min_speed': min_gpu_speed,
-                        'max_speed': max_gpu_speed,
+                        'avg_speed': sum(speeds) / len(speeds),
+                        'min_speed': min(speeds),
+                        'max_speed': max(speeds),
                         'num_files': len(speeds)
                     }
 
                 all_recognition_speeds.extend(speeds)
+                all_run_times.extend(run_times)
+                for r in result['results']:
+                    r['gpu_id'] = gpu_id
                 all_results.extend(result['results'])
             except Exception as e:
                 print(f"Worker process failed: {e}")
@@ -291,19 +301,26 @@ def main():
     print("=" * 70)
     print("OVERALL STATISTICS")
     print("=" * 70)
+    overall_speed_stats = None
     if all_recognition_speeds:
-        avg_speed = sum(all_recognition_speeds) / len(all_recognition_speeds)
-        min_speed = min(all_recognition_speeds)
-        max_speed = max(all_recognition_speeds)
+        overall_speed_stats = {
+            "avg_speed": sum(all_recognition_speeds) / len(all_recognition_speeds),
+            "min_speed": min(all_recognition_speeds),
+            "max_speed": max(all_recognition_speeds),
+            "num_files": len(all_recognition_speeds)
+        }
+        if all_run_times:
+            overall_speed_stats["run_time_min"] = total_minutes
 
-        print(f"Average recognition speed: {avg_speed:.2f}x realtime")
-        print(f"Min recognition speed:     {min_speed:.2f}x realtime")
-        print(f"Max recognition speed:     {max_speed:.2f}x realtime")
-        print(f"Total files processed:     {len(all_recognition_speeds)}")
+        print(f"Average recognition speed: {overall_speed_stats['avg_speed']:.2f}x realtime")
+        print(f"Min recognition speed:     {overall_speed_stats['min_speed']:.2f}x realtime")
+        print(f"Max recognition speed:     {overall_speed_stats['max_speed']:.2f}x realtime")
+        print(f"Total files processed:     {overall_speed_stats['num_files']}")
 
         # Calculate effective parallel throughput
         if len(gpu_stats) > 1:
-            effective_throughput = avg_speed * len(gpu_stats)
+            effective_throughput = overall_speed_stats['avg_speed'] * len(gpu_stats)
+            overall_speed_stats['effective_parallel_throughput'] = effective_throughput
             print(f"Effective parallel throughput: {effective_throughput:.2f}x realtime ({len(gpu_stats)} GPUs)")
     else:
         print("No recognition speed data available.")
@@ -324,6 +341,20 @@ def main():
     print("=" * 70)
     print(f"Total processing time: {total_minutes:.2f} minutes ({total_elapsed_time:.1f} seconds)")
     print("=" * 70)
+
+    # Patch the same per-GPU and overall speed stats shown above directly into
+    # each successful file's own transcription JSON, rather than a separate
+    # summary file - these stats aren't known until every file is done, so
+    # this necessarily runs as a pass after the main transcription loop.
+    successful_results = [r for r in all_results if r['json_file']]
+    for r in successful_results:
+        add_speed_stats_to_json(
+            r['json_file'],
+            gpu_speed_stats=gpu_stats.get(r['gpu_id']),
+            overall_speed_stats=overall_speed_stats
+        )
+    if successful_results:
+        print(f"Speed stats added to {len(successful_results)} transcription JSON file(s)")
 
 
 if __name__ == "__main__":

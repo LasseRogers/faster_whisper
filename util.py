@@ -121,9 +121,9 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
         # Calculate total transcription time
         transcription_time_sec = time.time() - start_time
 
-        # Save metadata to JSON - recognition_speed comes back directly from this
-        # call, no need to reopen the file we just wrote to read it back out.
-        json_file, recognition_speed = write_transcription_json(
+        # Save metadata to JSON - recognition_speed and run_time_min come back
+        # directly from this call, no need to reopen the file we just wrote.
+        json_file, recognition_speed, run_time_min = write_transcription_json(
             audio_file,
             segments_data,
             info,
@@ -141,8 +141,8 @@ def transcribe_file(model, audio_file, output_dir, batch_size=16, language=None,
             except Exception as e:
                 print(f"[GPU {gpu_id}] Failed to produce VAD plot for {audio_file}: {e}")
 
-        # Return paths to TXT and JSON files, plus recognition_speed
-        return txt_file, json_file, recognition_speed
+        # Return paths to TXT and JSON files, plus recognition_speed and run_time_min
+        return txt_file, json_file, recognition_speed, run_time_min
 
     except Exception:
         # Transcription failed partway through - remove the subfolder we
@@ -167,28 +167,21 @@ def write_transcription_json(
     duration_sec = getattr(info, "duration", 0) if getattr(info, "duration", None) else 0
     duration_after_vad_sec = getattr(info, "duration_after_vad", None)
 
-    # Duration of speech segments transcribed (derived by summing segments - kept
-    # for comparison against duration_after_vad_sec, which is faster-whisper's own value)
-    speech_duration_sec = sum(seg["end"] - seg["start"] for seg in segments)
-
-    # Duration of audio filtered out by VAD - now based on faster-whisper's own
-    # duration_after_vad instead of the segment-summed approximation above,
-    # falling back to the approximation if duration_after_vad isn't available
-    if duration_after_vad_sec is not None:
-        non_speech_duration_sec = max(duration_sec - duration_after_vad_sec, 0)
-    else:
-        non_speech_duration_sec = max(duration_sec - speech_duration_sec, 0)
+    # Duration of audio filtered out by VAD - based on faster-whisper's own
+    # duration_after_vad value
+    non_speech_duration_sec = max(duration_sec - duration_after_vad_sec, 0) \
+        if duration_after_vad_sec is not None else None
 
     # Convert to minutes
     duration_min = duration_sec / 60
-    speech_duration_min = speech_duration_sec / 60
-    non_speech_duration_min = non_speech_duration_sec / 60
+    duration_after_vad_min = duration_after_vad_sec / 60 if duration_after_vad_sec is not None else None
+    non_speech_duration_min = non_speech_duration_sec / 60 if non_speech_duration_sec is not None else None
     run_time_min = transcription_time_sec / 60 if transcription_time_sec else None
 
-    # Compute recognition speed
+    # Compute recognition speed, based on faster-whisper's own duration_after_vad
     recognition_speed = None
-    if transcription_time_sec and transcription_time_sec > 0:
-        recognition_speed = speech_duration_sec / transcription_time_sec
+    if transcription_time_sec and transcription_time_sec > 0 and duration_after_vad_sec is not None:
+        recognition_speed = duration_after_vad_sec / transcription_time_sec
 
     # Compute an overall average log-probability across all segments,
     # weighted by segment duration (longer segments count more toward the average)
@@ -208,13 +201,12 @@ def write_transcription_json(
         "device": device,
         "audio_duration_min": duration_min,
         "non_speech_duration_min": non_speech_duration_min,
-        "speech_duration_min": speech_duration_min,
-        # duration_after_vad_sec: reported directly by faster-whisper's VAD step.
-        # non_speech_duration_min above is now derived from this value (when available),
-        # so the two should always be consistent.
-        "duration_after_vad_sec": duration_after_vad_sec,
-        "run_time_min": run_time_min,
-        "recognition_speed": recognition_speed,
+        # duration_after_vad_min: reported directly by faster-whisper's VAD step
+        # (converted to minutes to match the other duration fields here)
+        "duration_after_vad_min": duration_after_vad_min,
+        # run_time_min and recognition_speed for this individual file are not
+        # stored at the top level - instead they get folded into the "gpu"
+        # and "overall" aggregate stats added later, via add_speed_stats_to_json
         # run_settings: full snapshot of every effective config value used for
         # this run (model_size, batch_size, language, vad_filter, beam_size,
         # workers_per_gpu, output_dir, gpu_ids), accounting for any
@@ -232,9 +224,10 @@ def write_transcription_json(
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-    # Return recognition_speed alongside the file path so callers don't need
-    # to reopen and re-parse the JSON we just wrote to get this value back.
-    return json_file, recognition_speed
+    # Return recognition_speed and run_time_min alongside the file path so
+    # callers don't need to reopen and re-parse the JSON to get these back -
+    # both are used later to build the aggregate "gpu"/"overall" speed_stats.
+    return json_file, recognition_speed, run_time_min
 
 
 def write_failed_files_json(failed_results: list, output_dir: str) -> str:
@@ -255,6 +248,25 @@ def write_failed_files_json(failed_results: list, output_dir: str) -> str:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
     return failed_file
+
+
+def add_speed_stats_to_json(json_file: str, gpu_speed_stats: dict, overall_speed_stats: dict) -> None:
+    """Patch an already-written transcription JSON with the aggregate speed
+    stats for the run (per-GPU and overall min/max/avg), matching what's
+    printed to the console. These aren't known until every file is done, so
+    this necessarily runs as a second pass after the main transcription loop
+    - unlike the write-then-reread we removed earlier, this is a deliberate
+    update rather than reading back a value we already had in memory."""
+    with open(json_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    data["speed_stats"] = {
+        "gpu": gpu_speed_stats,
+        "overall": overall_speed_stats
+    }
+
+    with open(json_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 
 def collect_audio_files(input_path: str, limit: int = None) -> List[str]:
