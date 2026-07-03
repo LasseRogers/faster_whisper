@@ -3,4 +3,6 @@ __pycache__
 transcriptions
 *.json
 downsampled
+venv/
 .venv/
+files

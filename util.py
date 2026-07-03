@@ -55,16 +55,25 @@ def write_transcription_json(
     info,
     json_file: str,
     device: str = None,
-    transcription_time_sec: float = None
+    transcription_time_sec: float = None,
+    beam_size: int = None,
+    run_settings: dict = None
 ) -> str:
 
     duration_sec = getattr(info, "duration", 0) if getattr(info, "duration", None) else 0
+    duration_after_vad_sec = getattr(info, "duration_after_vad", None)
 
-    # Duration of speech segments transcribed
+    # Duration of speech segments transcribed (derived by summing segments - kept
+    # for comparison against duration_after_vad_sec, which is faster-whisper's own value)
     speech_duration_sec = sum(seg["end"] - seg["start"] for seg in segments)
 
-    # Duration of audio filtered out by VAD
-    non_speech_duration_sec = max(duration_sec - speech_duration_sec, 0)
+    # Duration of audio filtered out by VAD - now based on faster-whisper's own
+    # duration_after_vad instead of the segment-summed approximation above,
+    # falling back to the approximation if duration_after_vad isn't available
+    if duration_after_vad_sec is not None:
+        non_speech_duration_sec = max(duration_sec - duration_after_vad_sec, 0)
+    else:
+        non_speech_duration_sec = max(duration_sec - speech_duration_sec, 0)
 
     # Convert to minutes
     duration_min = duration_sec / 60
@@ -77,6 +86,18 @@ def write_transcription_json(
     if transcription_time_sec and transcription_time_sec > 0:
         recognition_speed = speech_duration_sec / transcription_time_sec
 
+    # Compute an overall average log-probability across all segments,
+    # weighted by segment duration (longer segments count more toward the average)
+    avg_logprob_overall = None
+    weighted_segments = [
+        (seg["end"] - seg["start"], seg["avg_logprob"])
+        for seg in segments
+        if seg.get("avg_logprob") is not None and (seg["end"] - seg["start"]) > 0
+    ]
+    if weighted_segments:
+        total_weight = sum(w for w, _ in weighted_segments)
+        avg_logprob_overall = sum(w * lp for w, lp in weighted_segments) / total_weight
+
     # Build JSON schema
     data = {
         "audio_file": audio_file,
@@ -84,10 +105,22 @@ def write_transcription_json(
         "audio_duration_min": duration_min,
         "non_speech_duration_min": non_speech_duration_min,
         "speech_duration_min": speech_duration_min,
+        # duration_after_vad_sec: reported directly by faster-whisper's VAD step.
+        # non_speech_duration_min above is now derived from this value (when available),
+        # so the two should always be consistent.
+        "duration_after_vad_sec": duration_after_vad_sec,
         "run_time_min": run_time_min,
         "recognition_speed": recognition_speed,
+        # run_settings: full snapshot of every effective config value used for
+        # this run (model_size, batch_size, language, vad_filter, beam_size,
+        # concurrent_files_per_gpu, output_dir, gpu_ids), accounting for any
+        # CLI overrides - not just the raw config.yaml. Makes each JSON
+        # self-documenting about exactly what settings produced it.
+        "run_settings": run_settings,
         "language": info.language,
         "language_probability": info.language_probability,
+        # duration-weighted average log-probability across all segments in this file
+        "avg_logprob_overall": avg_logprob_overall,
         "segments": segments
     }
 
