@@ -26,8 +26,8 @@ def parse_args():
     parser.add_argument("-n", "--limit", type=int, default=None, help="Limit number of files")
     parser.add_argument("-o", "--output", type=str, default=None, help="Output directory")
     parser.add_argument("-g", "--gpus", type=str, default=None, help="Comma-separated GPU IDs (e.g., '0,1,2,3')")
-    parser.add_argument("-c", "--concurrent", type=int, default=None,
-                         help="Number of files to process concurrently per GPU (overrides config)")
+    parser.add_argument("-w", "--workers", type=int, default=None,
+                         help="Number of workers per GPU, i.e. files processed concurrently on one GPU (overrides config)")
     parser.add_argument("-b", "--beam-size", type=int, default=None,
                          help="Beam size for decoding (overrides config)")
     return parser.parse_args()
@@ -189,11 +189,11 @@ def _process_one_file(model, audio_file, output_dir, batch_size, language, vad_f
 
 
 def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language, vad_filter,
-               config, concurrent_files=1, beam_size=5, run_settings=None):
+               config, workers_per_gpu=1, beam_size=5, run_settings=None):
     """Worker process that handles a specific GPU.
 
     Files assigned to this GPU are processed using a thread pool so that
-    up to `concurrent_files` transcriptions can be in-flight on the GPU at
+    up to `workers_per_gpu` transcriptions can be in-flight on the GPU at
     once, instead of strictly one-at-a-time.
     """
     # Set this process to only see one GPU
@@ -205,7 +205,7 @@ def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language
     device = "cuda"
 
     print(f"[GPU {gpu_id}] Loading model (CUDA_VISIBLE_DEVICES={gpu_id}, "
-          f"concurrent_files={concurrent_files})")
+          f"workers_per_gpu={workers_per_gpu})")
 
     # Load model - a single instance shared across threads
     compute_type = "float16" if device == "cuda" else "int8"
@@ -215,7 +215,7 @@ def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language
     results = []
     recognition_speeds = []
 
-    if concurrent_files <= 1:
+    if workers_per_gpu <= 1:
         # Original sequential behavior
         for audio_file in audio_files:
             result = _process_one_file(
@@ -226,9 +226,9 @@ def gpu_worker(gpu_id, audio_files, output_dir, model_size, batch_size, language
             if result['recognition_speed'] is not None:
                 recognition_speeds.append(result['recognition_speed'])
     else:
-        # Concurrent processing: up to `concurrent_files` transcriptions
+        # Concurrent processing: up to `workers_per_gpu` transcriptions
         # in flight on this GPU at once via threads sharing one model.
-        with ThreadPoolExecutor(max_workers=concurrent_files) as executor:
+        with ThreadPoolExecutor(max_workers=workers_per_gpu) as executor:
             futures = {
                 executor.submit(
                     _process_one_file, batched_model, audio_file, output_dir,
@@ -271,9 +271,9 @@ def main():
     language = config.get("language", None)
     vad_filter = config.get("vad_filter", False)
 
-    # Number of files to process concurrently per GPU
-    concurrent_files = args.concurrent if args.concurrent is not None \
-        else config.get("concurrent_files_per_gpu", 1)
+    # Number of workers per GPU, i.e. files processed concurrently on one GPU
+    workers_per_gpu = args.workers if args.workers is not None \
+        else config.get("workers_per_gpu", 1)
 
     # Beam size for decoding (faster-whisper defaults to 5 if not passed at all;
     # we default to 5 here too so behavior matches faster-whisper's own default
@@ -290,7 +290,7 @@ def main():
         "language": language,
         "vad_filter": vad_filter,
         "vad_plot_enable": config.get("vad_plot_enable", False),
-        "concurrent_files_per_gpu": concurrent_files,
+        "workers_per_gpu": workers_per_gpu,
         "beam_size": beam_size,
         "output_dir": output_dir,
         "gpu_ids": gpu_ids,
@@ -301,7 +301,7 @@ def main():
 
     print(f"Found {len(audio_files)} audio files to process")
     print(f"Distributing across {len(gpu_ids)} GPU(s), "
-          f"{concurrent_files} concurrent file(s) per GPU\n")
+          f"{workers_per_gpu} worker(s) per GPU\n")
 
     # Distribute files across GPUs (round-robin)
     num_gpus = len(gpu_ids)
@@ -334,7 +334,7 @@ def main():
                 task = pool.apply_async(
                     gpu_worker,
                     (gpu_id, files_per_gpu[i], output_dir, model_size, batch_size,
-                     language, vad_filter, config, concurrent_files, beam_size, run_settings)
+                     language, vad_filter, config, workers_per_gpu, beam_size, run_settings)
                 )
                 tasks.append(task)
 

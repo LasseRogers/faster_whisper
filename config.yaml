@@ -3,5 +3,5 @@ batch_size: 16
 language: "da"
 vad_filter: true
 vad_plot_enable: true
-concurrent_files_per_gpu: 2
+workers_per_gpu: 2
 beam_size: 5

@@ -113,7 +113,7 @@ def write_transcription_json(
         "recognition_speed": recognition_speed,
         # run_settings: full snapshot of every effective config value used for
         # this run (model_size, batch_size, language, vad_filter, beam_size,
-        # concurrent_files_per_gpu, output_dir, gpu_ids), accounting for any
+        # workers_per_gpu, output_dir, gpu_ids), accounting for any
         # CLI overrides - not just the raw config.yaml. Makes each JSON
         # self-documenting about exactly what settings produced it.
         "run_settings": run_settings,
